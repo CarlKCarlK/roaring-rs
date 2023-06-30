@@ -8,6 +8,7 @@ use criterion::{
     Throughput,
 };
 
+use range_set_blaze::RangeSetBlaze;
 use roaring::{MultiOps, RoaringBitmap, RoaringTreemap};
 
 use crate::datasets::Datasets;
@@ -246,6 +247,64 @@ fn and(c: &mut Criterion) {
         |a, b| BitAndAssign::bitand_assign(a, b),
         |a, b| a.intersection_len(b),
     )
+}
+
+fn stand_alone_and(
+    c: &mut Criterion,
+    // op_name: &str,
+    // op_own_own: impl Fn(RoaringBitmap, RoaringBitmap) -> RoaringBitmap,
+    // op_own_ref: impl Fn(RoaringBitmap, &RoaringBitmap) -> RoaringBitmap,
+    // op_ref_own: impl Fn(&RoaringBitmap, RoaringBitmap) -> RoaringBitmap,
+    // op_ref_ref: impl Fn(&RoaringBitmap, &RoaringBitmap) -> RoaringBitmap,
+    // mut op_assign_owned: impl FnMut(&mut RoaringBitmap, RoaringBitmap),
+    // mut op_assign_ref: impl FnMut(&mut RoaringBitmap, &RoaringBitmap),
+    // op_len: impl Fn(&RoaringBitmap, &RoaringBitmap) -> u64,
+) {
+    let mut group = c.benchmark_group(format!("stand_alone_and"));
+
+    let op_own_own = |a, b| BitAnd::bitand(a, b);
+    let op_rsb = |a, b| RangeSetBlaze::bitand(a, b);
+
+    for dataset in Datasets {
+        // if dataset.name != "census1881_srt" {
+        //     continue;
+        // }
+        let pairs = dataset.bitmaps.iter().cloned().tuple_windows::<(_, _)>().collect::<Vec<_>>();
+        let pairs_rsb = pairs
+            .iter()
+            .map(|(a, b)| {
+                let a = RangeSetBlaze::from_iter(a.iter());
+                let b = RangeSetBlaze::from_iter(b.iter());
+                (a, b)
+            })
+            .collect::<Vec<_>>();
+
+        group.bench_function(BenchmarkId::new("Roaring (own_own)", &dataset.name), |b| {
+            b.iter_batched(
+                || pairs.clone(),
+                |bitmaps| {
+                    for (a, b) in bitmaps {
+                        black_box(op_own_own(a, b));
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
+
+        group.bench_function(BenchmarkId::new("RangeSetBlaze", &dataset.name), |b| {
+            b.iter_batched(
+                || pairs_rsb.clone(),
+                |sets| {
+                    for (a, b) in sets {
+                        black_box(op_rsb(a, b));
+                    }
+                },
+                BatchSize::SmallInput,
+            );
+        });
+    }
+
+    group.finish();
 }
 
 #[allow(clippy::redundant_closure)]
@@ -719,6 +778,7 @@ criterion_group!(
     serialization,
     deserialization,
     successive_and,
-    successive_or
+    successive_or,
+    stand_alone_and
 );
 criterion_main!(benches);
